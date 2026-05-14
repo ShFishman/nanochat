@@ -16,6 +16,8 @@
 #   # with wandb:
 #   WANDB_RUN=he_fw2_d20 bash runs/speedrun_he_fw2_a100.sh
 #   # with HuggingFace upload at the end (set HF_TOKEN once or `huggingface-cli login`):
+#   #   HF_REPO_ID       = SFT/chat repo
+#   #   HF_REPO_ID_BASE  = base/pretrain repo (defaults to "${HF_REPO_ID}-base")
 #   HF_REPO_ID=myorg/nanochat-he-d20 HF_PRIVATE=1 bash runs/speedrun_he_fw2_a100.sh
 # ============================================================
 
@@ -110,10 +112,21 @@ torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts_he.chat_sft_he
 python -m nanochat.report generate
 
 # -----------------------------------------------------------------------------
-# 7) Upload to Hugging Face (optional). Set HF_REPO_ID and HF_TOKEN (or run
-#    `huggingface-cli login` once) to enable. Skipped if HF_REPO_ID unset.
+# 7) Upload BOTH the pretrained (base) and post-trained (SFT) models to HF.
+#    HF_REPO_ID  is the SFT (final, chat-ready) repo.
+#    HF_REPO_ID_BASE defaults to "${HF_REPO_ID}-base"; override to customize.
+#    Set HF_TOKEN env var or run `huggingface-cli login` once. Skipped if unset.
 if [ -n "${HF_REPO_ID:-}" ]; then
-    echo "[7/7] Uploading SFT checkpoint to https://huggingface.co/$HF_REPO_ID ..."
+    HF_REPO_ID_BASE="${HF_REPO_ID_BASE:-${HF_REPO_ID}-base}"
+
+    echo "[7/7a] Uploading BASE checkpoint to https://huggingface.co/$HF_REPO_ID_BASE ..."
+    python -m scripts_he.upload_to_hf \
+        --repo-id "$HF_REPO_ID_BASE" \
+        --model-tag "he_fw2_d${DEPTH}" \
+        --source base \
+        ${HF_PRIVATE:+--private}
+
+    echo "[7/7b] Uploading SFT checkpoint to https://huggingface.co/$HF_REPO_ID ..."
     python -m scripts_he.upload_to_hf \
         --repo-id "$HF_REPO_ID" \
         --model-tag "he_fw2_d${DEPTH}" \
@@ -121,7 +134,9 @@ if [ -n "${HF_REPO_ID:-}" ]; then
         ${HF_PRIVATE:+--private}
 else
     echo "[7/7] HF_REPO_ID not set, skipping HuggingFace upload."
-    echo "      To upload later:  python -m scripts_he.upload_to_hf --repo-id <user>/<name> --model-tag he_fw2_d${DEPTH}"
+    echo "      To upload later:"
+    echo "        python -m scripts_he.upload_to_hf --repo-id <user>/<name>-base --model-tag he_fw2_d${DEPTH} --source base"
+    echo "        python -m scripts_he.upload_to_hf --repo-id <user>/<name>      --model-tag he_fw2_d${DEPTH} --source sft"
 fi
 
 echo
