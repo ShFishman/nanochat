@@ -3,12 +3,11 @@ Builds Hebrew-only SFT JSONLs in the bare-list format required by
 tasks/customjson.py (each line is a JSON list of {role, content},
 alternating user/assistant starting with user).
 
-Hebrew SFT sources:
-  - dicta-il/HeQ           (CC-BY 4.0)   reading-comprehension QA
-  - tau/parashoot          (CC-BY 4.0)   first Hebrew QA dataset
-  - shacharbinyamin/dolly-15k-translated-to-hebrew  (CC-BY-SA 3.0)
-  - dicta-il/OpenHermes-2.5-Hebrew  (Apache 2.0)   multi-turn chats
-  - HebAI/alpaca-he         (CC-BY-NC-4.0)  -- only with --include-nc
+Hebrew SFT sources (all verified live, public, no gating):
+  - Etelis/HeQ_v1                          (CC-BY 4.0)  ~30k SQuAD-style QA
+  - imvladikon/parashoot                   (CC-BY 4.0)  ~3k SQuAD-style QA
+  - yuvalav/hebrew-qa                      (CC-BY 4.0)  ~30k alpaca-style QA
+  - CohereLabs/aya_collection_language_split (Apache 2.0) Hebrew instruction data
 
 Also generates ~200 hand-templated Hebrew identity rows so the SFT model
 has a coherent persona without bleeding English idiom from translation.
@@ -19,8 +18,7 @@ Outputs (under $NANOCHAT_BASE_DIR):
     identity_conversations_he.jsonl
 
 Run:
-    python -m scripts_he.prepare_sft_data_he             # commercial-safe
-    python -m scripts_he.prepare_sft_data_he --include-nc  # adds Alpaca-HE
+    python -m scripts_he.prepare_sft_data_he
 """
 
 import os
@@ -83,21 +81,34 @@ def _emit(messages: list[dict]) -> list[dict] | None:
     return cleaned
 
 
+def _parse_answers_field(answers):
+    """HeQ_v1 / parashoot answers may be dict or JSON string. Return first answer text."""
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except Exception:
+            return None
+    if isinstance(answers, dict):
+        texts = answers.get("text") or []
+        if texts and isinstance(texts, list):
+            return texts[0]
+    return None
+
+
 def load_heq():
+    """Etelis/HeQ_v1: SQuAD-style Hebrew QA. Note: column names are Capitalized."""
     from datasets import load_dataset
     try:
-        ds = load_dataset("dicta-il/HeQ", split="train")
+        ds = load_dataset("Etelis/HeQ_v1", split="train")
     except Exception as e:
-        print(f"[warn] HeQ load failed: {e}")
+        print(f"[warn] HeQ_v1 load failed: {e}")
         return
     for row in ds:
-        context = row.get("context", "")
-        question = row.get("question", "")
-        answers = row.get("answers", {}) or {}
-        answer_texts = answers.get("text", []) if isinstance(answers, dict) else []
-        if not answer_texts:
+        context = row.get("Context") or row.get("context") or ""
+        question = row.get("Question") or row.get("question") or ""
+        answer = _parse_answers_field(row.get("Answers") or row.get("answers"))
+        if not answer or row.get("Is_Impossible"):
             continue
-        answer = answer_texts[0]
         user_msg = f"קרא את הקטע הבא וענה על השאלה.\n\nקטע:\n{context}\n\nשאלה: {question}"
         result = _emit([
             {"role": "system", "content": SYSTEM_PROMPT_HE},
@@ -109,20 +120,19 @@ def load_heq():
 
 
 def load_parashoot():
+    """imvladikon/parashoot: SQuAD-style Hebrew QA. ~1.8k train rows."""
     from datasets import load_dataset
     try:
-        ds = load_dataset("tau/parashoot", split="train")
+        ds = load_dataset("imvladikon/parashoot", split="train")
     except Exception as e:
         print(f"[warn] ParaShoot load failed: {e}")
         return
     for row in ds:
         context = row.get("context", "")
         question = row.get("question", "")
-        answers = row.get("answers", {}) or {}
-        answer_texts = answers.get("text", []) if isinstance(answers, dict) else []
-        if not answer_texts:
+        answer = _parse_answers_field(row.get("answers"))
+        if not answer:
             continue
-        answer = answer_texts[0]
         user_msg = f"על פי הקטע הבא, ענה על השאלה.\n\nקטע:\n{context}\n\nשאלה: {question}"
         result = _emit([
             {"role": "system", "content": SYSTEM_PROMPT_HE},
@@ -133,66 +143,52 @@ def load_parashoot():
             yield result
 
 
-def load_dolly_he():
+def load_hebrew_qa():
+    """yuvalav/hebrew-qa: ~30k Alpaca-style Hebrew QA pairs (instruction/input/output)."""
     from datasets import load_dataset
     try:
-        ds = load_dataset("shacharbinyamin/dolly-15k-translated-to-hebrew", split="train")
+        ds = load_dataset("yuvalav/hebrew-qa", split="train")
     except Exception as e:
-        print(f"[warn] Dolly-HE load failed: {e}")
+        print(f"[warn] yuvalav/hebrew-qa load failed: {e}")
         return
     for row in ds:
-        instruction = row.get("instruction") or row.get("Instruction") or ""
-        context = row.get("context") or row.get("Context") or ""
-        response = row.get("response") or row.get("Response") or ""
-        if not instruction or not response:
+        instruction = (row.get("instruction") or "").strip()
+        input_text = (row.get("input") or "").strip()
+        output = (row.get("output") or "").strip()
+        if not instruction or not output:
             continue
-        user_content = instruction if not context else f"{instruction}\n\nהקשר:\n{context}"
+        user_content = instruction if not input_text else f"{instruction}\n\n{input_text}"
         result = _emit([
             {"role": "system", "content": SYSTEM_PROMPT_HE},
             {"role": "user", "content": user_content},
-            {"role": "assistant", "content": response},
+            {"role": "assistant", "content": output},
         ])
         if result:
             yield result
 
 
-def load_openhermes_he():
+def load_aya_hebrew():
+    """CohereLabs/aya_collection_language_split, config='hebrew'. inputs/targets columns."""
     from datasets import load_dataset
     try:
-        ds = load_dataset("dicta-il/OpenHermes-2.5-Hebrew", split="train")
+        ds = load_dataset("CohereLabs/aya_collection_language_split", "hebrew", split="train")
     except Exception as e:
-        print(f"[warn] OpenHermes-2.5-Hebrew load failed: {e}")
-        return
+        # Fall back to test split if train missing for this config
+        print(f"[warn] aya hebrew train split failed: {e}; trying test split")
+        try:
+            ds = load_dataset("CohereLabs/aya_collection_language_split", "hebrew", split="test")
+        except Exception as e2:
+            print(f"[warn] aya hebrew load failed entirely: {e2}")
+            return
     for row in ds:
-        conversations = row.get("conversations") or row.get("messages") or []
-        messages = [{"role": "system", "content": SYSTEM_PROMPT_HE}]
-        for turn in conversations:
-            role = turn.get("from") or turn.get("role") or ""
-            content = turn.get("value") or turn.get("content") or ""
-            messages.append({"role": role, "content": content})
-        result = _emit(messages)
-        if result:
-            yield result
-
-
-def load_alpaca_he():
-    from datasets import load_dataset
-    try:
-        ds = load_dataset("HebAI/alpaca-he", split="train")
-    except Exception as e:
-        print(f"[warn] Alpaca-HE load failed: {e}")
-        return
-    for row in ds:
-        instruction = row.get("instruction", "")
-        input_text = row.get("input", "")
-        output = row.get("output", "")
-        if not instruction or not output:
+        inputs = (row.get("inputs") or "").strip()
+        targets = (row.get("targets") or "").strip()
+        if not inputs or not targets:
             continue
-        user_content = f"{instruction}\n{input_text}".strip()
         result = _emit([
             {"role": "system", "content": SYSTEM_PROMPT_HE},
-            {"role": "user", "content": user_content},
-            {"role": "assistant", "content": output},
+            {"role": "user", "content": inputs},
+            {"role": "assistant", "content": targets},
         ])
         if result:
             yield result
@@ -288,7 +284,7 @@ def write_jsonl(rows: list[list[dict]], path: Path):
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
-def prepare(include_nc: bool, val_frac: float, seed: int):
+def prepare(val_frac: float, seed: int):
     base_dir = Path(get_base_dir())
     out_train = base_dir / "sft_data_he.train.jsonl"
     out_val = base_dir / "sft_data_he.val.jsonl"
@@ -298,28 +294,21 @@ def prepare(include_nc: bool, val_frac: float, seed: int):
     rng = random.Random(seed)
     records: list[list[dict]] = []
 
-    print("Loading HeQ ...")
+    print("Loading Etelis/HeQ_v1 ...")
     records.extend(load_heq())
     print(f"  cumulative: {len(records):,}")
 
-    print("Loading ParaShoot ...")
+    print("Loading imvladikon/parashoot ...")
     records.extend(load_parashoot())
     print(f"  cumulative: {len(records):,}")
 
-    print("Loading Dolly-HE ...")
-    records.extend(load_dolly_he())
+    print("Loading yuvalav/hebrew-qa ...")
+    records.extend(load_hebrew_qa())
     print(f"  cumulative: {len(records):,}")
 
-    print("Loading OpenHermes-2.5-HE ...")
-    records.extend(load_openhermes_he())
+    print("Loading CohereLabs/aya_collection_language_split (hebrew) ...")
+    records.extend(load_aya_hebrew())
     print(f"  cumulative: {len(records):,}")
-
-    if include_nc:
-        print("Loading Alpaca-HE (NC license) ...")
-        records.extend(load_alpaca_he())
-        print(f"  cumulative: {len(records):,}")
-    else:
-        print("Skipping Alpaca-HE (pass --include-nc to include).")
 
     if not records:
         sys.exit("ERROR: no Hebrew SFT examples loaded. Check HF connectivity / credentials.")
@@ -343,10 +332,8 @@ def prepare(include_nc: bool, val_frac: float, seed: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare Hebrew-only SFT data")
-    parser.add_argument("--include-nc", action="store_true",
-                        help="Include non-commercial datasets (Alpaca-HE)")
     parser.add_argument("--val-frac", type=float, default=0.05,
                         help="Fraction of data to hold out for validation (default 0.05)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    prepare(include_nc=args.include_nc, val_frac=args.val_frac, seed=args.seed)
+    prepare(val_frac=args.val_frac, seed=args.seed)
