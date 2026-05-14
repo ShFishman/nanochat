@@ -16,9 +16,11 @@
 #   # with wandb:
 #   WANDB_RUN=he_fw2_d20 bash runs/speedrun_he_fw2_a100.sh
 #   # with HuggingFace upload at the end (set HF_TOKEN once or `huggingface-cli login`):
-#   #   HF_REPO_ID       = SFT/chat repo
-#   #   HF_REPO_ID_BASE  = base/pretrain repo (defaults to "${HF_REPO_ID}-base")
-#   HF_REPO_ID=myorg/nanochat-he-d20 HF_PRIVATE=1 bash runs/speedrun_he_fw2_a100.sh
+#   #   HF_REPO_ID         = single repo hosting both base + SFT (default: ShFishman/nanochat-hebrew-d20)
+#   #   HF_VERSION_FOLDER  = subfolder inside the repo  (default: v2-fw2-hebrew-only)
+#   #   Layout after run:  <repo>/<version>/base/...   <repo>/<version>/sft/...
+#   #   Run scripts_he/reorganize_hf_repo.py FIRST to move the old model into v1-mixed-75he-25en/.
+#   HF_PRIVATE=1 bash runs/speedrun_he_fw2_a100.sh
 # ============================================================
 
 set -euo pipefail
@@ -112,31 +114,35 @@ torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts_he.chat_sft_he
 python -m nanochat.report generate
 
 # -----------------------------------------------------------------------------
-# 7) Upload BOTH the pretrained (base) and post-trained (SFT) models to HF.
-#    HF_REPO_ID  is the SFT (final, chat-ready) repo.
-#    HF_REPO_ID_BASE defaults to "${HF_REPO_ID}-base"; override to customize.
-#    Set HF_TOKEN env var or run `huggingface-cli login` once. Skipped if unset.
-if [ -n "${HF_REPO_ID:-}" ]; then
-    HF_REPO_ID_BASE="${HF_REPO_ID_BASE:-${HF_REPO_ID}-base}"
+# 7) Upload BOTH the pretrained (base) and post-trained (SFT) models to HF,
+#    into versioned subfolders of a single repo. Defaults target
+#    ShFishman/nanochat-hebrew-d20 with the v2 layout described in its README.
+#    Override HF_REPO_ID and HF_VERSION_FOLDER to point elsewhere.
+#    Set HF_TOKEN env var or run `huggingface-cli login` once. Skipped if HF_REPO_ID="" .
+HF_REPO_ID="${HF_REPO_ID-ShFishman/nanochat-hebrew-d20}"
+HF_VERSION_FOLDER="${HF_VERSION_FOLDER:-v2-fw2-hebrew-only}"
 
-    echo "[7/7a] Uploading BASE checkpoint to https://huggingface.co/$HF_REPO_ID_BASE ..."
+if [ -n "${HF_REPO_ID}" ]; then
+    echo "[7/7a] Uploading BASE checkpoint to https://huggingface.co/$HF_REPO_ID/tree/main/$HF_VERSION_FOLDER/base ..."
     python -m scripts_he.upload_to_hf \
-        --repo-id "$HF_REPO_ID_BASE" \
+        --repo-id "$HF_REPO_ID" \
         --model-tag "he_fw2_d${DEPTH}" \
         --source base \
+        --path-in-repo "$HF_VERSION_FOLDER/base" \
         ${HF_PRIVATE:+--private}
 
-    echo "[7/7b] Uploading SFT checkpoint to https://huggingface.co/$HF_REPO_ID ..."
+    echo "[7/7b] Uploading SFT checkpoint to https://huggingface.co/$HF_REPO_ID/tree/main/$HF_VERSION_FOLDER/sft ..."
     python -m scripts_he.upload_to_hf \
         --repo-id "$HF_REPO_ID" \
         --model-tag "he_fw2_d${DEPTH}" \
         --source sft \
+        --path-in-repo "$HF_VERSION_FOLDER/sft" \
         ${HF_PRIVATE:+--private}
 else
-    echo "[7/7] HF_REPO_ID not set, skipping HuggingFace upload."
+    echo "[7/7] HF_REPO_ID is empty, skipping HuggingFace upload."
     echo "      To upload later:"
-    echo "        python -m scripts_he.upload_to_hf --repo-id <user>/<name>-base --model-tag he_fw2_d${DEPTH} --source base"
-    echo "        python -m scripts_he.upload_to_hf --repo-id <user>/<name>      --model-tag he_fw2_d${DEPTH} --source sft"
+    echo "        python -m scripts_he.upload_to_hf --repo-id ShFishman/nanochat-hebrew-d20 --model-tag he_fw2_d${DEPTH} --source base --path-in-repo v2-fw2-hebrew-only/base"
+    echo "        python -m scripts_he.upload_to_hf --repo-id ShFishman/nanochat-hebrew-d20 --model-tag he_fw2_d${DEPTH} --source sft  --path-in-repo v2-fw2-hebrew-only/sft"
 fi
 
 echo
