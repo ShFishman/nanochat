@@ -129,3 +129,7 @@ if __name__ == "__main__":
 
     shard_dir = get_shard_dir()
     write_shards(args.num_shards, shard_dir, start_idx=args.start_idx)
+    # HF datasets streaming workers can throw at interpreter shutdown
+    # (`terminate called without an active exception`). Force clean exit
+    # after successful writes so the speedrun shell sees a 0 exit code.
+    os._exit(0)
