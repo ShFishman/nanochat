@@ -4,10 +4,12 @@ tasks/customjson.py (each line is a JSON list of {role, content},
 alternating user/assistant starting with user).
 
 Hebrew SFT sources (all verified live, public, no gating):
-  - Etelis/HeQ_v1                          (CC-BY 4.0)  ~30k SQuAD-style QA
-  - imvladikon/parashoot                   (CC-BY 4.0)  ~3k SQuAD-style QA
+  - Etelis/HeQ_v1                          (CC-BY 4.0)  ~27k SQuAD-style QA
+  - imvladikon/parashoot                   (CC-BY 4.0)  ~1.8k SQuAD-style QA
   - yuvalav/hebrew-qa                      (CC-BY 4.0)  ~30k alpaca-style QA
-  - CohereLabs/aya_collection_language_split (Apache 2.0) Hebrew instruction data
+  - CohereLabs/aya_collection_language_split (Apache 2.0) Hebrew portion;
+      capped to ~30k random rows so it doesn't drown the other sources.
+      Raise/lower via --aya-max-rows.
 
 Also generates ~200 hand-templated Hebrew identity rows so the SFT model
 has a coherent persona without bleeding English idiom from translation.
@@ -167,19 +169,28 @@ def load_hebrew_qa():
             yield result
 
 
-def load_aya_hebrew():
-    """CohereLabs/aya_collection_language_split, config='hebrew'. inputs/targets columns."""
+def load_aya_hebrew(max_rows: int = 30000, seed: int = 42):
+    """CohereLabs/aya_collection_language_split, config='hebrew'. inputs/targets columns.
+
+    The full Hebrew split is ~3.65M rows — way larger than the other sources.
+    To keep the mixture balanced we shuffle once and take only max_rows random
+    examples (default 30k). Pass max_rows=0 (or a very large number) to use all.
+    """
     from datasets import load_dataset
     try:
         ds = load_dataset("CohereLabs/aya_collection_language_split", "hebrew", split="train")
     except Exception as e:
-        # Fall back to test split if train missing for this config
         print(f"[warn] aya hebrew train split failed: {e}; trying test split")
         try:
             ds = load_dataset("CohereLabs/aya_collection_language_split", "hebrew", split="test")
         except Exception as e2:
             print(f"[warn] aya hebrew load failed entirely: {e2}")
             return
+
+    if max_rows and max_rows > 0:
+        n = min(max_rows, len(ds))
+        ds = ds.shuffle(seed=seed).select(range(n))
+
     for row in ds:
         inputs = (row.get("inputs") or "").strip()
         targets = (row.get("targets") or "").strip()
@@ -284,7 +295,7 @@ def write_jsonl(rows: list[list[dict]], path: Path):
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
-def prepare(val_frac: float, seed: int):
+def prepare(val_frac: float, seed: int, aya_max_rows: int):
     base_dir = Path(get_base_dir())
     out_train = base_dir / "sft_data_he.train.jsonl"
     out_val = base_dir / "sft_data_he.val.jsonl"
@@ -306,8 +317,8 @@ def prepare(val_frac: float, seed: int):
     records.extend(load_hebrew_qa())
     print(f"  cumulative: {len(records):,}")
 
-    print("Loading CohereLabs/aya_collection_language_split (hebrew) ...")
-    records.extend(load_aya_hebrew())
+    print(f"Loading CohereLabs/aya_collection_language_split (hebrew, cap={aya_max_rows:,}) ...")
+    records.extend(load_aya_hebrew(max_rows=aya_max_rows, seed=seed))
     print(f"  cumulative: {len(records):,}")
 
     if not records:
@@ -334,6 +345,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare Hebrew-only SFT data")
     parser.add_argument("--val-frac", type=float, default=0.05,
                         help="Fraction of data to hold out for validation (default 0.05)")
+    parser.add_argument("--aya-max-rows", type=int, default=30000,
+                        help="Cap on aya hebrew rows (default 30000). Set to 0 for all 3.65M.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    prepare(val_frac=args.val_frac, seed=args.seed)
+    prepare(val_frac=args.val_frac, seed=args.seed, aya_max_rows=args.aya_max_rows)
