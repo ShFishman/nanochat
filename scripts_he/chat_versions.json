@@ -1,0 +1,29 @@
+{
+  "default_id": "v2-sft-balanced",
+  "versions": [
+    {
+      "id": "v2-sft-balanced",
+      "label": "v2 - Hebrew-only (balanced SFT, recommended)",
+      "repo_id": "ShFishman/nanochat-hebrew-d20",
+      "path_in_repo": "v2-fw2-hebrew-only/sft"
+    },
+    {
+      "id": "v2-sft-aya",
+      "label": "v2 - Hebrew-only (Aya-heavy SFT)",
+      "repo_id": "ShFishman/nanochat-hebrew-d20",
+      "path_in_repo": "v2-fw2-hebrew-only/sft-aya-heavy"
+    },
+    {
+      "id": "v2-base",
+      "label": "v2 - Hebrew-only (base, pretrained — no chat)",
+      "repo_id": "ShFishman/nanochat-hebrew-d20",
+      "path_in_repo": "v2-fw2-hebrew-only/base"
+    },
+    {
+      "id": "v1-mixed",
+      "label": "v1 - 75% Hebrew / 25% English (SFT)",
+      "repo_id": "ShFishman/nanochat-hebrew-d20",
+      "path_in_repo": "v1-mixed-75he-25en"
+    }
+  ]
+}
