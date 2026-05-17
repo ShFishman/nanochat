@@ -5,6 +5,8 @@ REM Later runs: just activates the venv and launches the app.
 
 setlocal
 cd /d "%~dp0"
+echo Working directory: %CD%
+echo.
 
 set VENV=.venv-desktop
 set PYEXE=%VENV%\Scripts\python.exe
@@ -17,10 +19,10 @@ if not exist "%VENV%" (
     ) else (
         py -3 -m venv "%VENV%"
     )
-    if errorlevel 1 (
-        echo ERROR: could not create venv. Make sure Python 3.10+ is installed.
-        pause
-        exit /b 1
+    if not exist "%PYEXE%" (
+        echo ERROR: could not create venv. Make sure Python 3.10+ is installed and on PATH.
+        echo Try running 'python --version' or 'py -3 --version' to verify.
+        goto :end
     )
 
     echo [setup] upgrading pip ...
@@ -30,27 +32,31 @@ if not exist "%VENV%" (
     "%PYEXE%" -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.9.1"
     if errorlevel 1 (
         echo ERROR: torch install failed.
-        pause
-        exit /b 1
+        goto :end
     )
 
     echo [setup] installing chat dependencies ...
-    "%PYEXE%" -m pip install ^
-        "huggingface_hub>=0.24" ^
-        "tokenizers>=0.22.0" ^
-        "tiktoken>=0.11.0" ^
-        "rustbpe>=0.1.0" ^
-        "filelock>=3.13"
+    "%PYEXE%" -m pip install "huggingface_hub>=0.24" "tokenizers>=0.22.0" "tiktoken>=0.11.0" "rustbpe>=0.1.0" "filelock>=3.13"
     if errorlevel 1 (
         echo ERROR: dependency install failed.
-        pause
-        exit /b 1
+        goto :end
     )
     echo [setup] done.
     echo.
 )
 
+if not exist "%PYEXE%" (
+    echo ERROR: %PYEXE% not found. Delete the %VENV% folder and try again.
+    goto :end
+)
+
 echo [launch] starting desktop app ...
 "%PYEXE%" scripts_he\chat_desktop_he.py
-if errorlevel 1 pause
+echo.
+echo [exit] app closed with code %ERRORLEVEL%
+
+:end
+echo.
+echo Press any key to close this window...
+pause >nul
 endlocal
